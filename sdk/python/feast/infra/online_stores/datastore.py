@@ -133,7 +133,10 @@ class DatastoreOnlineStore(OnlineStore):
             key = client.key("Project", feast_project, "Table", table.name)
             client.delete(key)
 
-    def _get_client(self, online_config: DatastoreOnlineStoreConfig):
+    def _get_client(
+        self, online_config: DatastoreOnlineStoreConfig
+    ) -> datastore.Client:
+
         if not self._client:
             self._client = _initialize_client(
                 online_config.project_id, online_config.namespace
@@ -158,7 +161,6 @@ class DatastoreOnlineStore(OnlineStore):
         write_concurrency = online_config.write_concurrency
         write_batch_size = online_config.write_batch_size
         feast_project = config.project
-
         pool = ThreadPool(processes=write_concurrency)
         pool.map(
             lambda b: self._write_minibatch(client, feast_project, table, b, progress),
@@ -182,7 +184,7 @@ class DatastoreOnlineStore(OnlineStore):
 
     @staticmethod
     def _write_minibatch(
-        client,
+        client: datastore.Client,
         project: str,
         table: FeatureView,
         data: Sequence[
@@ -190,17 +192,36 @@ class DatastoreOnlineStore(OnlineStore):
         ],
         progress: Optional[Callable[[int], Any]],
     ):
-        entities = []
+        all_datastore_keys = []
+        for entity_key, _, _, _ in data:
+            document_id = compute_entity_id(entity_key)
+            key = client.key(
+                "Project", project, "Table", table.name, "Row", document_id,
+            )
+            all_datastore_keys.append(key)
+        # new_entities: List[datastore.Entity] = []
+        # existing_entities: List[datastore.Entity] = client.get_multi(
+        #     all_datastore_keys, missing=new_entities
+        # )
+        entities_to_write: List[datastore.Entity] = []
+        # TODO: refactor below to populate entities_to_write without requerying datastore like below
         for entity_key, features, timestamp, created_ts in data:
             document_id = compute_entity_id(entity_key)
 
             key = client.key(
                 "Project", project, "Table", table.name, "Row", document_id,
             )
+            # TODO: remove this get and instead use results from the multiget
+            existing_entity: datastore.Entity = client.get(key)
+            new_ts = utils.make_tzaware(timestamp)
+            if existing_entity and existing_entity["event_ts"] >= new_ts:
+                continue
 
-            entity = datastore.Entity(
-                key=key, exclude_from_indexes=("created_ts", "event_ts", "values")
-            )
+            entity = existing_entity
+            if not entity:
+                entity = datastore.Entity(
+                    key=key, exclude_from_indexes=("created_ts", "event_ts", "values")
+                )
 
             content_entity = datastore.Entity(
                 exclude_from_indexes=tuple(features.keys())
@@ -214,12 +235,12 @@ class DatastoreOnlineStore(OnlineStore):
                 utils.make_tzaware(created_ts) if created_ts is not None else None
             )
 
-            entities.append(entity)
+            entities_to_write.append(entity)
         with client.transaction():
-            client.put_multi(entities)
+            client.put_multi(entities_to_write)
 
         if progress:
-            progress(len(entities))
+            progress(len(entities_to_write))
 
     @log_exceptions_and_usage(online_store="datastore")
     def online_read(

@@ -57,7 +57,7 @@ DEFAULT_FULL_REPO_CONFIGS: List[IntegrationTestRepoConfig] = [
 if os.getenv("FEAST_IS_LOCAL_TEST", "False") != "True":
     DEFAULT_FULL_REPO_CONFIGS.extend(
         [
-            IntegrationTestRepoConfig(online_store=REDIS_CONFIG),
+            # IntegrationTestRepoConfig(online_store=REDIS_CONFIG),
             # GCP configurations
             IntegrationTestRepoConfig(
                 provider="gcp",

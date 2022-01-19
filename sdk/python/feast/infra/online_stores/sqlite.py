@@ -105,7 +105,7 @@ class SqliteOnlineStore(OnlineStore):
                         f"""
                             UPDATE {_table_id(project, table)}
                             SET value = ?, event_ts = ?, created_ts = ?
-                            WHERE (entity_key = ? AND feature_name = ?)
+                            WHERE (entity_key = ? AND feature_name = ? AND ? >= event_ts)
                         """,
                         (
                             # SET
@@ -115,6 +115,7 @@ class SqliteOnlineStore(OnlineStore):
                             # WHERE
                             entity_key_bin,
                             feature_name,
+                            timestamp,
                         ),
                     )
 

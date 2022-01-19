@@ -1,6 +1,6 @@
 import datetime
 import itertools
-import os
+import random
 import time
 import unittest
 from datetime import timedelta
@@ -29,15 +29,12 @@ from tests.integration.feature_repos.universal.entities import (
 from tests.integration.feature_repos.universal.feature_views import (
     create_driver_hourly_stats_feature_view,
 )
-from tests.utils.data_source_utils import prep_file_source
 
 
-# TODO: make this work with all universal (all online store types)
 @pytest.mark.integration
-def test_write_to_online_store_event_check(local_redis_environment):
-    if os.getenv("FEAST_IS_LOCAL_TEST", "False") == "True":
-        return
-    fs = local_redis_environment.feature_store
+@pytest.mark.universal
+def test_write_to_online_store_event_check(environment):
+    fs = environment.feature_store
 
     # write same data points 3 with different timestamps
     now = pd.Timestamp(datetime.datetime.utcnow()).round("ms")
@@ -48,95 +45,99 @@ def test_write_to_online_store_event_check(local_redis_environment):
         "id": [123, 567, 890],
         "string_col": ["OLD_FEATURE", "LATEST_VALUE2", "LATEST_VALUE3"],
         "ts_1": [hour_ago, now, now],
+        "created_ts": [hour_ago, now, now],
     }
     dataframe_source = pd.DataFrame(data)
-    with prep_file_source(
-        df=dataframe_source, event_timestamp_column="ts_1"
-    ) as file_source:
-        e = Entity(name="id", value_type=ValueType.STRING)
+    data_source = environment.data_source_creator.create_data_source(
+        df=dataframe_source,
+        destination_name=f"test_write_to_online_store_time_check_{int(time.time_ns())}_{random.randint(1000, 9999)}",
+    )
 
-        # Create Feature View
-        fv1 = FeatureView(
-            name="feature_view_123",
-            features=[Feature(name="string_col", dtype=ValueType.STRING)],
-            entities=["id"],
-            batch_source=file_source,
-            ttl=timedelta(minutes=5),
-        )
-        # Register Feature View and Entity
-        fs.apply([fv1, e])
+    e = Entity(name="id", value_type=ValueType.STRING)
 
-        #  data to ingest into Online Store (recent)
-        data = {
-            "id": [123],
-            "string_col": ["hi_123"],
-            "ts_1": [now],
-        }
-        df_data = pd.DataFrame(data)
+    # Create Feature View
+    fv1 = FeatureView(
+        name="feature_view_123",
+        features=[Feature(name="string_col", dtype=ValueType.STRING)],
+        entities=["id"],
+        batch_source=data_source,
+        ttl=timedelta(minutes=5),
+    )
+    # Register Feature View and Entity
+    fs.apply([fv1, e])
 
-        # directly ingest data into the Online Store
-        fs.write_to_online_store("feature_view_123", df_data)
+    #  data to ingest into Online Store (recent)
+    data = {"id": [123], "string_col": ["hi_123"], "ts_1": [now], "created_ts": [now]}
+    df_data = pd.DataFrame(data)
 
-        df = fs.get_online_features(
-            features=["feature_view_123:string_col"], entity_rows=[{"id": 123}]
-        ).to_df()
-        assert df["string_col"].iloc[0] == "hi_123"
+    # directly ingest data into the Online Store
+    fs.write_to_online_store("feature_view_123", df_data)
 
-        # data to ingest into Online Store (1 hour delayed data)
-        # should now overwrite features for id=123 because it's less recent data
-        data = {
-            "id": [123, 567, 890],
-            "string_col": ["bye_321", "hello_123", "greetings_321"],
-            "ts_1": [hour_ago, hour_ago, hour_ago],
-        }
-        df_data = pd.DataFrame(data)
+    df = fs.get_online_features(
+        features=["feature_view_123:string_col"], entity_rows=[{"id": 123}]
+    ).to_df()
+    assert df["string_col"].iloc[0] == "hi_123"
 
-        # directly ingest data into the Online Store
-        fs.write_to_online_store("feature_view_123", df_data)
+    # data to ingest into Online Store (1 hour delayed data)
+    # should now overwrite features for id=123 because it's less recent data
+    data = {
+        "id": [123, 567, 890],
+        "string_col": ["bye_321", "hello_123", "greetings_321"],
+        "ts_1": [hour_ago, hour_ago, hour_ago],
+        "created_ts": [hour_ago, hour_ago, hour_ago],
+    }
+    df_data = pd.DataFrame(data)
 
-        df = fs.get_online_features(
-            features=["feature_view_123:string_col"],
-            entity_rows=[{"id": 123}, {"id": 567}, {"id": 890}],
-        ).to_df()
-        assert df["string_col"].iloc[0] == "hi_123"
-        assert df["string_col"].iloc[1] == "hello_123"
-        assert df["string_col"].iloc[2] == "greetings_321"
+    # directly ingest data into the Online Store
+    fs.write_to_online_store("feature_view_123", df_data)
 
-        # should overwrite string_col for id=123 because it's most recent based on event_timestamp
-        data = {
-            "id": [123],
-            "string_col": ["LATEST_VALUE"],
-            "ts_1": [latest],
-        }
-        df_data = pd.DataFrame(data)
+    df = fs.get_online_features(
+        features=["feature_view_123:string_col"],
+        entity_rows=[{"id": 123}, {"id": 567}, {"id": 890}],
+    ).to_df()
+    assert df["string_col"].iloc[0] == "hi_123"
+    assert df["string_col"].iloc[1] == "hello_123"
+    assert df["string_col"].iloc[2] == "greetings_321"
 
-        fs.write_to_online_store("feature_view_123", df_data)
+    # should overwrite string_col for id=123 because it's most recent based on event_timestamp
+    data = {
+        "id": [123],
+        "string_col": ["LATEST_VALUE"],
+        "ts_1": [latest],
+        "created_ts": [latest],
+    }
+    df_data = pd.DataFrame(data)
 
-        df = fs.get_online_features(
-            features=["feature_view_123:string_col"],
-            entity_rows=[{"id": 123}, {"id": 567}, {"id": 890}],
-        ).to_df()
-        assert df["string_col"].iloc[0] == "LATEST_VALUE"
-        assert df["string_col"].iloc[1] == "hello_123"
-        assert df["string_col"].iloc[2] == "greetings_321"
+    fs.write_to_online_store("feature_view_123", df_data)
 
-        # writes to online store via datasource (dataframe_source) materialization
-        fs.materialize(
-            start_date=datetime.datetime.now() - timedelta(hours=12),
-            end_date=datetime.datetime.utcnow(),
-        )
+    df = fs.get_online_features(
+        features=["feature_view_123:string_col"],
+        entity_rows=[{"id": 123}, {"id": 567}, {"id": 890}],
+    ).to_df()
+    assert df["string_col"].iloc[0] == "LATEST_VALUE"
+    assert df["string_col"].iloc[1] == "hello_123"
+    assert df["string_col"].iloc[2] == "greetings_321"
 
-        df = fs.get_online_features(
-            features=["feature_view_123:string_col"],
-            entity_rows=[{"id": 123}, {"id": 567}, {"id": 890}],
-        ).to_df()
-        assert df["string_col"].iloc[0] == "LATEST_VALUE"
-        assert df["string_col"].iloc[1] == "LATEST_VALUE2"
-        assert df["string_col"].iloc[2] == "LATEST_VALUE3"
+    # writes to online store via datasource (dataframe_source) materialization
+    fs.materialize(
+        start_date=datetime.datetime.now() - timedelta(hours=12),
+        end_date=datetime.datetime.utcnow(),
+    )
+
+    df = fs.get_online_features(
+        features=["feature_view_123:string_col"],
+        entity_rows=[{"id": 123}, {"id": 567}, {"id": 890}],
+    ).to_df()
+    assert df["string_col"].iloc[0] == "LATEST_VALUE"
+    assert df["string_col"].iloc[1] == "LATEST_VALUE2"
+    assert df["string_col"].iloc[2] == "LATEST_VALUE3"
 
 
 @pytest.mark.integration
 def test_write_to_online_store(environment, universal_data_sources):
+    if environment.test_repo_config.provider == "aws":
+        # Checking timestamp during stream ingestion not done for AWS yet.
+        pass
     fs = environment.feature_store
     entities, datasets, data_sources = universal_data_sources
     driver_hourly_stats = create_driver_hourly_stats_feature_view(
