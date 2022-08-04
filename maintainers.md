@@ -21,9 +21,8 @@
         - Lints your pr for styling or complexity issues using mypy, isort, and flake.
     - `fork-pr-local-integration-tests`
         - Run the local integration tests that test the Feast functionality in dockerized containers from your fork.
-            1. Move the `fork_pr_local_integration_tests.yml` from `.github/fork_workflows` to `.github/workflows`.
-            2. Edit the `fork_pr_local_integration_tests.yml` file under the `integration-test-python-local` job and replace `your github repo` with your feast github repo.
-            3. Push the workflow to your branch and it should automatically be added to the actions on your fork.
+          1. Move the `fork_pr_local_integration_tests.yml` from `.github/fork_workflows` to `.github/workflows`.
+          2. Edit the `fork_pr_local_integration_tests.yml` file under the `integration-test-python-local` job and replace `your github repo` with your feast github repo.
     - `fork-pr-integration-tests`
         - Run all of the integration tests to test Feast functionality on your fork.
             1. Move the `fork_pr_integration_tests.yml` from `.github/fork_workflows` to `.github/workflows`.
