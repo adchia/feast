@@ -862,7 +862,7 @@ WITH entity_dataframe AS (
             USING ({{featureview.name}}__entity_row_unique_id, event_timestamp, created_timestamp)
         {% endif %}
     )
-    WHERE row_number = 1
+    WHERE row_number = 2
 ),
 
 /*
